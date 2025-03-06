@@ -1,0 +1,9 @@
+[requires]
+libigl/2.5.0
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout
