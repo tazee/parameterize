@@ -3,6 +3,7 @@
 //
 
 #include "tool.hpp"
+#include "command.hpp"
 
 /*
  * On create we add our one tool attribute. We also allocate a vector type
@@ -309,6 +310,14 @@ LxResult CToolOp::top_Evaluate(ILxUnknownID vts)
 
         LxResult result = LXe_OK;
 
+        // Export triangle mesh for debugging
+        if (1)
+        {
+            param.MakeParamMesh(edit_mesh);
+            scan.SetMeshChange(i, LXf_MESHEDIT_GEOMETRY);
+            continue;
+        }
+
         // Parameterize using LSCM method
         if (m_method == CParam::METHOD_LSCM)
             result = param.LSCM(m_pinn);
@@ -398,7 +407,6 @@ LxResult CToolOp::eltgrp_TestPoint(unsigned int index, LXtPointID point)
     return LXe_FALSE;
 }
 
-
 /*
  * Export tool server.
  */
@@ -419,4 +427,6 @@ void initialize()
     srv->AddInterface(new CLxIfc_ToolOperation<CToolOp>);
     srv->AddInterface(new CLxIfc_MeshElementGroup<CToolOp>);
     lx::AddSpawner(SRVNAME_TOOLOP, srv);
+
+    CCommand::initialize();
 }

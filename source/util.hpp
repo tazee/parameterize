@@ -247,6 +247,17 @@ namespace MathUtil {
         *ix = plx[axis];
         *iy = ply[axis];
     }
+
+    template <typename T>
+    static bool CrossNormal (T norm, const T a1, const T a2, const T a3)
+    {
+        T a, b;
+
+        LXx_VSUB3 (a, a1, a2);
+        LXx_VSUB3 (b, a2, a3);
+        LXx_VCROSS (norm, a, b);
+        return lx::VectorNormalize (norm);
+    }
 };
 
 
@@ -284,6 +295,19 @@ struct AxisPlane
         lx::MatrixTranspose(m_mInv);
     }
 
+    AxisPlane(unsigned int axis)
+    {
+        static const unsigned axis0[] = { 1, 2, 0 };
+        static const unsigned axis1[] = { 2, 0, 1 };
+
+        m_axis = axis;
+        m_ix   = axis0[m_axis];
+        m_iy   = axis1[m_axis];
+
+        lx::MatrixIdent(m_m);
+        lx::MatrixIdent(m_mInv);
+    }
+
     void ToPlane(const LXtVector pos, double& x, double& y, double& z)
     {
         LXtVector r;
@@ -313,6 +337,19 @@ struct AxisPlane
 
     unsigned  m_axis, m_ix, m_iy;
     LXtMatrix m_m, m_mInv;
+
+    double Determ(const LXtFVector prev, const LXtFVector curr, const LXtFVector next)
+    {
+        double x1, y1, x2, y2, x3, y3, z;
+    
+        ToPlane(prev, x1, y1, z);
+        ToPlane(curr, x2, y2, z);
+        ToPlane(next, x3, y3, z);
+
+        double a = (x2 - x1) * (y3 - y1);
+        double b = (x3 - x1) * (y2 - y1);
+        return a - b;
+    }
 };
 
 
@@ -1126,6 +1163,106 @@ static bool IsDiscoEdge(CLxUser_Mesh& mesh, CLxUser_MeshMap& vmap, CLxUser_Edge 
     }
 
     return false;
+}
+
+// Get the orientation of the give vertex list
+static int VertexListOrientation(CLxUser_Mesh& mesh, AxisPlane& axisPlane, std::vector<LXtPointID>& points)
+{
+    CLxUser_Point point;
+    LXtFVector pos;
+    double x0, y0, x1, y1, z;
+
+    point.fromMesh(mesh);
+    point.Select(points.front());
+    point.Pos(pos);
+    axisPlane.ToPlane(pos, x0, y0, z);
+    point.Select(points.back());
+    point.Pos(pos);
+    axisPlane.ToPlane(pos, x1, y1, z);
+    double area = x1 * y0 - x0 * y1;
+
+    for (auto i = 1u; i < points.size(); i++)
+    {
+        point.Select(points[i]);
+        point.Pos(pos);
+        axisPlane.ToPlane(pos, x1, y1, z);
+        area += x0 * y1 - x1 * y0;
+        x0 = x1;
+        y0 = y1;
+    }
+
+	return (area >= 0.0);
+}
+
+// Get vertex list of the given polygon. If the first vertex is not convex, it fixes the order of vertices.
+static bool PolygonFixedVertexList(CLxUser_Mesh& mesh, CLxUser_Polygon& poly, std::vector<LXtPointID>& points)
+{
+    LXtVector norm;
+    poly.Normal(norm);
+
+    AxisPlane axisPlane(MathUtil::MaxExtent(norm));
+
+    unsigned nvert;
+    poly.VertexCount(&nvert);
+    points.resize(nvert);
+
+    for (auto i = 0u; i < nvert; i++)
+    {
+        LXtPointID pntID;
+        poly.VertexByIndex(i, &pntID);
+        points[i] = pntID;
+    }
+
+    if (nvert < 4)
+        return false;
+
+    auto orient = VertexListOrientation(mesh, axisPlane, points);
+
+    // The first vertex is convex
+    int i = norm[axisPlane.m_axis] < 0.0;
+    if ((i ^ orient))
+        return false;
+
+    CLxUser_Point point;
+    point.fromMesh(mesh);
+
+    LXtFVector prev, curr, next;
+    double dmax = 0.0;
+    unsigned index = 0;
+
+    for (auto i = 0u; i < nvert; i++)
+    {
+        point.Select(points[(i - 1 + nvert) % nvert]);
+        point.Pos(prev);
+        point.Select(points[i]);
+        point.Pos(curr);
+        point.Select(points[(i + 1) % nvert]);
+        point.Pos(next);
+        double d = axisPlane.Determ(prev, curr, next);
+        if (((d >= 0.0) == orient) && (std::abs(d) >= dmax))
+        {
+            dmax = std::abs(d);
+            index = i;
+        }
+    }
+
+#if 0
+    int poly_index;
+    poly.Index(&poly_index);
+    CLxUser_StringTag polyTag;
+    polyTag.set(poly);
+    const char* matr = polyTag.Value(LXi_PTAG_MATR);
+#endif
+    if (index == 0)
+        return false;
+    
+    std::vector<LXtPointID> temp;
+    temp = points;
+    for (auto i = 0u; i < points.size(); i++)
+    {
+        points[i] = temp[(i + index) % points.size()];
+    }
+    return true;
 }
 
 }; // MeshUtil

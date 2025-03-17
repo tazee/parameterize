@@ -104,6 +104,7 @@ struct CParam
         void*        userData;  // any working data
         int          index;     // solver index
         ParamEdgeID  edge;      // an edge
+        LXtMarkMode                   marks;      // marks for working
     };
 
     struct ParamFace
@@ -220,6 +221,7 @@ struct CParam
     LxResult LSCM(int pinn);
     LxResult ARAP();
     LxResult Border(unsigned border, unsigned param);
+    LxResult FMVC();
     LxResult SLIM(int iter);
 
     // V : 3d vertex positions
@@ -232,6 +234,8 @@ struct CParam
 
     LxResult Apply(CLxUser_Mesh& edit_mesh, double gaps);
 
+    // Make new triangles and replace the source mesh with them for debugging
+    LxResult MakeParamMesh(CLxUser_Mesh& edit_mesh);
 
 //    LxResult         Project();
     LxResult         AddTriangle(LXtPolygonID pol, LXtPointID v0, LXtPointID v1, LXtPointID v2);
@@ -241,6 +245,7 @@ struct CParam
     ParamVerxID      FetchVertex(LXtPointID vrt);
     ParamVerxID      AddVertex(LXtPointID vrt, LXtPolygonID pol, ParamTriangleID tri);
     bool             IsSeamEdge(CLxUser_Edge& edge);
+    
 //    void             ProjectionAxis(CLxBoundingBox& box, LXtVector p1, LXtVector p2);
     bool             LockVertex(ParamVerxID dv);
 //    unsigned int     ProjectPlanar(ParamGroupID grp, LXtMatrix& m);

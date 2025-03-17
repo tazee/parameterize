@@ -5,6 +5,8 @@
 #include "parameterize.hpp"
 #include "util.hpp"
 
+#include <lxsdk/lxu_geometry_triangulation.hpp>
+
 #include <CGAL/Simple_cartesian.h>
 #include <CGAL/Surface_mesh.h>
 #include <CGAL/Surface_mesh_parameterization/LSCM_parameterizer_3.h>
@@ -26,6 +28,14 @@
 #include <igl/harmonic.h>
 
 #define MODE_M(c, s) ((LXtMarkMode) (((c) << 16) | s))
+
+#define MARK_ALL	((unsigned int)0xFFFF)
+#define MM_CLEAR(m)	(((m) >> 16) & MARK_ALL)
+#define MM_SET(m)	((m) & MARK_ALL)
+#define APPLY_M(d,c,s)	(((d) & ~(c)) | (s))
+#define APPLY_MODE(d,m)	APPLY_M(d,MM_CLEAR(m),MM_SET(m))
+#define TEST_M(d,c,s)	((((d) & (s)) == s) && (((d) & (c)) == 0))
+#define TEST_MODE(d,m)	TEST_M(d,MM_CLEAR(m),MM_SET(m))
 
 //#define UNWRAP_MINU(a, b) ((a)[0] < (b)[0] || (!lx::Compare((a)[0], (b)[0]) && (a)[1] < (b)[1]))
 //#define UNWRAP_MINV(a, b) ((a)[1] < (b)[1] || (!lx::Compare((a)[1], (b)[1]) && (a)[0] < (b)[0]))
@@ -69,6 +79,8 @@ public:
 
         m_context->AddPolygon(m_poly.ID());
 
+        std::vector<LXtPointID> points;
+
         LXtPointID v0, v1, v2;
         if (nvert == 3)
         {
@@ -77,8 +89,28 @@ public:
             m_poly.VertexByIndex(2, &v2);
             m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
         }
+        else if ((nvert == 4) && MeshUtil::PolygonFixedVertexList(m_mesh, m_poly, points))
+        {
+            v0 = points[0];
+            for (auto i = 1u; i < points.size()-1; i++)
+            {
+                v1 = points[i];
+                v2 = points[i+1];
+                m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
+            }
+        }
         else
         {
+#if 0
+        std::vector<lx::GeoTriangle> geoTris = lx::TriangulateFace (m_poly, m_vert);
+        for (auto i = 0u; i < geoTris.size(); i++)
+        {
+            m_poly.VertexByIndex(geoTris[i].v0, &v0);
+            m_poly.VertexByIndex(geoTris[i].v1, &v1);
+            m_poly.VertexByIndex(geoTris[i].v2, &v2);
+            m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
+        }
+#else
             unsigned count;
             m_poly.GenerateTriangles(&count);
             for (auto i = 0u; i < count; i++)
@@ -86,6 +118,7 @@ public:
                 m_poly.TriangleByIndex(i, &v0, &v1, &v2);
                 m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
             }
+#endif
         }
         return LXe_OK;
     }
@@ -223,19 +256,31 @@ LxResult CParam::AddTriangle(LXtPolygonID pol, LXtPointID v0, LXtPointID v1, LXt
     m_triangles.push_back(tri);
 #endif
 
+    LXtVector norm;
+    LXtFVector cross;
     if (pol)
     {
         m_poly.Select(pol);
         m_poly.Index(&tri->pol_index);
+        m_poly.Normal(norm);
     }
     ParamVerxID dv[3];
     dv[0] = AddVertex(v0, pol, tri);
     dv[1] = AddVertex(v1, pol, tri);
     dv[2] = AddVertex(v2, pol, tri);
+#if 0
     printf("AddTriangle pol (%d) relax (%d) vrt %u %u %u dv %u %u %u\n", 
         tri->pol_index, m_relax,
         dv[0]->vrt_index, dv[1]->vrt_index, dv[2]->vrt_index, 
         dv[0]->index, dv[1]->index, dv[2]->index);
+#endif
+    if (dv[0]->vrt != v0 || dv[1]->vrt != v1 || dv[2]->vrt != v2)
+        printf("AddTriangle topo dv %p %p %p v0 %p %p %p\n", 
+            dv[0]->vrt, dv[1]->vrt, dv[2]->vrt, v0, v1, v2);
+    MathUtil::CrossNormal(cross, dv[0]->pos, dv[1]->pos, dv[2]->pos);
+    if (LXx_VDOT(norm, cross) < 0.0)
+        printf("AddTriangle norm dv %p %p %p v0 %p %p %p\n", 
+            dv[0]->vrt, dv[1]->vrt, dv[2]->vrt, v0, v1, v2);
 
     CLxUser_Edge edge;
     edge.fromMesh(m_mesh);
@@ -408,12 +453,20 @@ CParam::ParamVerxID CParam::AddVertex(LXtPointID vrt, LXtPolygonID pol, ParamTri
     ParamTriangleID ref = FetchTriangle(vrt, pol);
     if (ref)
     {
+        ParamVerxID dv = nullptr;
+
         if (ref->v0->vrt == vrt)
-            return ref->v0;
+            dv = ref->v0;
         if (ref->v1->vrt == vrt)
-            return ref->v1;
+            dv = ref->v1;
         if (ref->v2->vrt == vrt)
-            return ref->v2;
+            dv = ref->v2;
+
+        if (dv)
+        {
+            dv->tris.push_back(tri);
+            return dv;
+        }
     }
 
 #if 1
@@ -424,6 +477,7 @@ CParam::ParamVerxID CParam::AddVertex(LXtPointID vrt, LXtPolygonID pol, ParamTri
     m_vertices.push_back(dv);
 #endif
 
+    dv->tris.push_back(tri);
     dv->vrt   = vrt;
     dv->tri   = tri;
     dv->flags = 0;
@@ -499,6 +553,8 @@ LxResult CParam::Setup(LXtMarkMode edge_mark, bool seal, bool relax)
         m_pick = 0;
 
     m_relax = relax;
+    if (relax)
+        m_layout = false;
 
     // generate triangles from surface polygons
     TripleFaceVisitor triFace;
@@ -662,6 +718,8 @@ void CParam::LoadUVs(ParamGroupID grp)
             }
         }
     }
+    // Update group info using computed UV values.
+    SetGroupInfo (grp);
 }
 
 #if 0
@@ -756,6 +814,63 @@ LxResult CParam::Apply(CLxUser_Mesh& edit_mesh, double gaps)
     return LXe_OK;
 }
 
+LxResult CParam::MakeParamMesh(CLxUser_Mesh& edit_mesh)
+{
+    m_poly.fromMesh(edit_mesh);
+    m_vert.fromMesh(edit_mesh);
+
+    std::vector<LXtPointID> new_points;
+    new_points.resize(m_vertices.size());
+
+    for(auto i = 0u; i < m_vertices.size(); i++)
+    {
+        m_vertices[i]->index = i;
+        LXtVector pos;
+        LXtPointID pntID;
+        LXx_VCPY(pos, m_vertices[i]->pos);
+        m_vert.New(pos, &pntID);
+        new_points[i] = pntID;
+        m_vert.Select(m_vertices[i]->vrt);
+        m_vert.Remove();
+    }
+
+    std::vector<std::vector<LXtPointID>> new_polys;
+    for(auto& tri : m_triangles)
+    {
+        std::vector<LXtPointID> pnts;
+        pnts.resize(3);
+        pnts[0] = new_points[tri->v0->index];
+        pnts[1] = new_points[tri->v1->index];
+        pnts[2] = new_points[tri->v2->index];
+        LXtPolygonID polID;
+        m_poly.New(LXiPTYP_FACE, pnts.data(), 3, 0, &polID);
+        if (tri->pol)
+        {
+            m_poly.Select(tri->pol);
+            m_poly.Remove();
+        }
+        new_polys.push_back(pnts);
+    }
+
+    for (auto i = 0u; i < new_polys.size(); i++)
+    {
+        auto& tri1 = new_polys[i];
+        for (auto j = i + 1; j < new_polys.size(); j++)
+        {
+            auto& tri2 = new_polys[j];
+            if ((tri1[0] == tri2[0] && tri1[1] == tri2[1] && tri1[2] == tri2[2]) ||
+                (tri1[0] == tri2[1] && tri1[1] == tri2[2] && tri1[2] == tri2[0]) ||
+                (tri1[0] == tri2[2] && tri1[1] == tri2[0] && tri1[2] == tri2[1]))
+            {
+                printf("Flipped triangle tri1 %p %p %p tri2 %p %p %p\n",
+                    tri1[0], tri1[1], tri1[2], 
+                    tri2[0], tri2[1], tri2[2]);
+            }
+        }
+    }
+
+    return LXe_OK;
+}
 
 LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::MatrixXd& V_o, Eigen::VectorXi& b, Eigen::MatrixXd& bc)
 {
@@ -1357,9 +1472,6 @@ LxResult CParam::LSCM(int pinn)
 //
 LxResult CParam::ARAP()
 {
-    // Project the UVs
-//    Project();
-
     printf("ARAP\n");
     // Parameterize the UVs of each group
     for(auto& grp : m_groups)
@@ -1450,9 +1562,6 @@ LxResult CParam::ARAP()
 //
 LxResult CParam::Border(unsigned border, unsigned param)
 {
-    // Project the UVs
-//    Project();
-
     printf("BORDER\n");
     // Parameterize the UVs of each group
     for(auto& grp : m_groups)
@@ -1602,12 +1711,92 @@ LxResult CParam::Border(unsigned border, unsigned param)
 }
 
 
+//
+// CGAL Default Prameterization, namly Floater Mean Value Coordinates
+//
+LxResult CParam::FMVC()
+{
+    printf("FMVC\n");
+    // Parameterize the UVs of each group
+    for(auto& grp : m_groups)
+    {
+        Mesh mesh;
+
+        std::unordered_map<ParamVerxID, Mesh::Vertex_index> index_map;
+
+        // Setup CGAL Surface Mesh
+        for (auto& dv : grp->discos)
+        {
+            auto v = mesh.add_vertex(Point_3(dv->pos[0], dv->pos[1], dv->pos[2]));
+            index_map.insert(std::make_pair(dv, v));
+        }
+        for (auto& tri : grp->tris)
+        {
+            Mesh::Vertex_index v0 = index_map[tri->v0];
+            Mesh::Vertex_index v1 = index_map[tri->v1];
+            Mesh::Vertex_index v2 = index_map[tri->v2];
+            mesh.add_face(v0, v1, v2);
+        }
+
+        // Get the longest halfedge on the border
+        Mesh::Halfedge_index bhd = GetLongestHalfEdge (mesh);
+        if (!bhd.is_valid())
+        {
+            printf("FMVC No border edge\n");
+            grp->locked = true;
+	        continue;
+        }
+
+        // Added UV map to the surface mesh.
+        auto uv_map = mesh.add_property_map<Mesh::Vertex_index, Point_2>("v:uv").first;
+
+        // Floater Mean Value Coordinates Parameterization
+        auto status = SMP::OK;
+        try
+        {
+            status = SMP::parameterize (mesh, bhd, uv_map);
+            printf("FMVC status (%d)\n", status == SMP::OK);
+        }
+        catch (const CGAL::Assertion_exception& e)
+        {
+            s_log.DebugOut(LXi_DBLOG_NORMAL, "CGAL Assertion : %s", e.what());
+	        return LXe_FAILED;
+        }
+        catch (const std::exception& e)
+        {
+            s_log.DebugOut(LXi_DBLOG_NORMAL, "Standard : %s", e.what());
+	        return LXe_FAILED;
+        }
+        catch (...)
+        {
+            s_log.DebugOut(LXi_DBLOG_NORMAL, "Unknown exception occurred!");
+	        return LXe_FAILED;
+        }
+        
+        if (status != SMP::OK)
+        {
+	        return LXe_FAILED;
+        }
+
+        for (const auto& v : mesh.vertices()) {
+            const Point_2& uv = uv_map[v];
+            auto& dv = grp->discos[v];
+            dv->value[0] = uv.x();
+            dv->value[1] = uv.y();
+        }
+        
+        // Update group info using computed UV values.
+        SetGroupInfo (grp);
+    }
+	return LXe_OK;
+}
+
 LxResult CParam::SLIM(int iter)
 {
-    // Precompute initial UVs using fixed border method.
+    // Precompute initial UVs using FMVC method.
     if (m_relax == false)
     {
-        LxResult result = Border(BORDER_CIRCULAR, PARAM_BARYCENTRIC);
+        LxResult result = FMVC();
         if (result != LXe_OK)
             return result;
     }
