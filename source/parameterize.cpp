@@ -4,6 +4,7 @@
 
 #include "parameterize.hpp"
 #include "util.hpp"
+#include "triangulate.hpp"
 
 #include <lxsdk/lxu_geometry_triangulation.hpp>
 
@@ -82,6 +83,25 @@ public:
         std::vector<LXtPointID> points;
 
         LXtPointID v0, v1, v2;
+        CLxUser_StringTag polyTag(m_poly);
+        if (std::string(polyTag.Value(LXi_PTAG_MATR)) == "NonAlign")
+        {
+            LXtVector norm;
+            m_poly.Normal(norm);
+            printf("{%s} norm %f %f %f\n", polyTag.Value(LXi_PTAG_MATR), norm[0], norm[1], norm[2]);
+            for (auto j = 0u; j < nvert; j++)
+            {
+                m_poly.VertexByIndex(j, &v0);
+                m_vert.Select(v0);
+                unsigned index;
+                m_vert.Index(&index);
+                if (!j)
+                    printf("[%u", index);
+                else
+                    printf(" %u", index);
+            }
+            printf("]\n");
+        }
         if (nvert == 3)
         {
             m_poly.VertexByIndex(0, &v0);
@@ -89,28 +109,57 @@ public:
             m_poly.VertexByIndex(2, &v2);
             m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
         }
-        else if ((nvert == 4) && MeshUtil::PolygonFixedVertexList(m_mesh, m_poly, points))
+        else if (MeshUtil::PolygonFixedVertexList(m_mesh, m_poly, points))
         {
-            v0 = points[0];
-            for (auto i = 1u; i < points.size()-1; i++)
+            bool done = false;
+            if (nvert >= 4)
             {
-                v1 = points[i];
-                v2 = points[i+1];
-                m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
+                LXtVector norm;
+                //MeshUtil::VertexListNormal(m_mesh, points, norm);
+                m_poly.Normal(norm);
+                if (std::string(polyTag.Value(LXi_PTAG_MATR)) == "NonAlign")
+                {
+                    printf("{%s} norm %f %f %f\n", polyTag.Value(LXi_PTAG_MATR), norm[0], norm[1], norm[2]);
+                    for (auto j = 0u; j < points.size(); j++)
+                    {
+                        m_vert.Select(points[j]);
+                        unsigned index;
+                        m_vert.Index(&index);
+                        if (!j)
+                            printf("[%u", index);
+                        else
+                            printf(" %u", index);
+                    }
+                    printf("]\n");
+                }
+                AxisPlane axisPlane(norm);
+                std::vector<std::vector<LXtPointID>> tris;
+                CTriangulate ctri(m_mesh);
+                LxResult result = ctri.EarClipping(axisPlane, points, tris);
+                if (std::string(polyTag.Value(LXi_PTAG_MATR)) == "NonAlign")
+                    printf("EarClipping ok (%d) polyID %p nvert = %u\n", (result == LXe_OK), m_poly.ID(), nvert);
+                if (result == LXe_OK)
+                {
+                    for (auto& vert : tris)
+                    {
+                        m_context->AddTriangle(m_poly.ID(), vert[0], vert[1], vert[2]);
+                    }
+                    done = true;
+                }
+            }
+            if (!done)
+            {
+                v0 = points[0];
+                for (auto i = 1u; i < points.size()-1; i++)
+                {
+                    v1 = points[i];
+                    v2 = points[i+1];
+                    m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
+                }
             }
         }
         else
         {
-#if 0
-        std::vector<lx::GeoTriangle> geoTris = lx::TriangulateFace (m_poly, m_vert);
-        for (auto i = 0u; i < geoTris.size(); i++)
-        {
-            m_poly.VertexByIndex(geoTris[i].v0, &v0);
-            m_poly.VertexByIndex(geoTris[i].v1, &v1);
-            m_poly.VertexByIndex(geoTris[i].v2, &v2);
-            m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
-        }
-#else
             unsigned count;
             m_poly.GenerateTriangles(&count);
             for (auto i = 0u; i < count; i++)
@@ -118,7 +167,6 @@ public:
                 m_poly.TriangleByIndex(i, &v0, &v1, &v2);
                 m_context->AddTriangle(m_poly.ID(), v0, v1, v2);
             }
-#endif
         }
         return LXe_OK;
     }
@@ -274,13 +322,12 @@ LxResult CParam::AddTriangle(LXtPolygonID pol, LXtPointID v0, LXtPointID v1, LXt
         dv[0]->vrt_index, dv[1]->vrt_index, dv[2]->vrt_index, 
         dv[0]->index, dv[1]->index, dv[2]->index);
 #endif
-    if (dv[0]->vrt != v0 || dv[1]->vrt != v1 || dv[2]->vrt != v2)
-        printf("AddTriangle topo dv %p %p %p v0 %p %p %p\n", 
-            dv[0]->vrt, dv[1]->vrt, dv[2]->vrt, v0, v1, v2);
+#if 0
     MathUtil::CrossNormal(cross, dv[0]->pos, dv[1]->pos, dv[2]->pos);
     if (LXx_VDOT(norm, cross) < 0.0)
         printf("AddTriangle norm dv %p %p %p v0 %p %p %p\n", 
             dv[0]->vrt, dv[1]->vrt, dv[2]->vrt, v0, v1, v2);
+#endif
 
     CLxUser_Edge edge;
     edge.fromMesh(m_mesh);

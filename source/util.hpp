@@ -248,10 +248,19 @@ namespace MathUtil {
         *iy = ply[axis];
     }
 
-    template <typename T>
-    static bool CrossNormal (T norm, const T a1, const T a2, const T a3)
+    static bool CrossNormal (LXtVector norm, const LXtVector a1, const LXtVector a2, const LXtVector a3)
     {
-        T a, b;
+        LXtVector a, b;
+
+        LXx_VSUB3 (a, a1, a2);
+        LXx_VSUB3 (b, a2, a3);
+        LXx_VCROSS (norm, a, b);
+        return lx::VectorNormalize (norm);
+    }
+
+    static bool CrossNormal (LXtFVector norm, const LXtFVector a1, const LXtFVector a2, const LXtFVector a3)
+    {
+        LXtFVector a, b;
 
         LXx_VSUB3 (a, a1, a2);
         LXx_VSUB3 (b, a2, a3);
@@ -1165,8 +1174,32 @@ static bool IsDiscoEdge(CLxUser_Mesh& mesh, CLxUser_MeshMap& vmap, CLxUser_Edge 
     return false;
 }
 
+static bool TriangleNormal(CLxUser_Mesh& mesh, LXtPointID v0, LXtPointID v1, LXtPointID v2, LXtVector norm)
+{
+    CLxUser_Point point;
+    point.fromMesh(mesh);
+
+    LXtFVector pos;
+    point.Select(v0);
+    point.Pos(pos);
+    LXtVector pos0;
+    LXx_VCPY(pos0, pos);
+
+    point.Select(v1);
+    point.Pos(pos);
+    LXtVector pos1;
+    LXx_VCPY(pos1, pos);
+
+    point.Select(v2);
+    point.Pos(pos);
+    LXtVector pos2;
+    LXx_VCPY(pos2, pos);
+
+    return MathUtil::CrossNormal(norm, pos0, pos1, pos2);
+}
+
 // Get the orientation of the give vertex list
-static int VertexListOrientation(CLxUser_Mesh& mesh, AxisPlane& axisPlane, std::vector<LXtPointID>& points)
+static bool VertexListOrientation(CLxUser_Mesh& mesh, AxisPlane& axisPlane, std::vector<LXtPointID>& points)
 {
     CLxUser_Point point;
     LXtFVector pos;
@@ -1263,6 +1296,59 @@ static bool PolygonFixedVertexList(CLxUser_Mesh& mesh, CLxUser_Polygon& poly, st
         points[i] = temp[(i + index) % points.size()];
     }
     return true;
+}
+
+static double TriangleDeterm (CLxUser_Mesh& mesh, AxisPlane& axisPlane, LXtPointID v1, LXtPointID v2, LXtPointID v3)
+{
+    CLxUser_Point point;
+    point.fromMesh(mesh);
+
+    LXtFVector pos1, pos2, pos3;
+
+    point.Select(v1);
+    point.Pos(pos1);
+    point.Select(v2);
+    point.Pos(pos2);
+    point.Select(v3);
+    point.Pos(pos3);
+
+    return axisPlane.Determ(pos1, pos2, pos3);
+}
+
+static bool TriangleCorner (CLxUser_Mesh& mesh, AxisPlane& axisPlane, bool orient, LXtPointID v1, LXtPointID v2, LXtPointID v3)
+{
+    double d = TriangleDeterm(mesh, axisPlane, v1, v2, v3);
+    if (!d)
+        return false;
+	return (d > 0.0) == orient;
+}
+
+// Check the orientation of the triangle on the axis plane in the given vertex list.
+static bool TriangleOriented (CLxUser_Mesh& mesh, AxisPlane& axisPlane, std::vector<LXtPointID>& points, bool orient, LXtPointID v1, LXtPointID v2, LXtPointID v3)
+{
+	// Check the determination of the triangle.
+    double d = TriangleDeterm(mesh, axisPlane, v1, v2, v3);
+	if ((d >= 0.0) != orient)
+		return false;
+
+	for (auto i = 0u; i < points.size(); i++) {
+		LXtPointID v = points[i];
+
+		if ((v == v1) || (v == v2) || (v == v3))
+			continue;
+
+		if (TriangleCorner (mesh, axisPlane, orient, v2, v1, v)
+		 || TriangleCorner (mesh, axisPlane, orient, v1, v3, v)
+		 || TriangleCorner (mesh, axisPlane, orient, v3, v2, v))
+		{
+			continue;	/* point is outside */
+		}
+		else
+		{
+			return false;	/* point is inside */
+		}
+	}
+	return true;
 }
 
 }; // MeshUtil
