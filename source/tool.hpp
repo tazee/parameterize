@@ -65,19 +65,11 @@ using namespace lx_err;
 //
 // The Tool Operation is evaluated by the procedural modeling system.
 //
-class CToolOp : public CLxImpl_ToolOperation, public CLxImpl_MeshElementGroup
+class CToolOp : public CLxImpl_ToolOperation
 {
 	public:
         // ToolOperation Interface
 		LxResult    top_Evaluate(ILxUnknownID vts)  LXx_OVERRIDE;
-    
-        // MeshElementGroup Interface
-        LxResult	eltgrp_GroupCount	(unsigned int *count)				LXx_OVERRIDE;
-        LxResult	eltgrp_GroupName	(unsigned int index, const char **name)		LXx_OVERRIDE;
-        LxResult	eltgrp_GroupUserName	(unsigned int index, const char **username)	LXx_OVERRIDE;
-        LxResult	eltgrp_TestPolygon	(unsigned int index, LXtPolygonID polygon)	LXx_OVERRIDE;
-        LxResult    eltgrp_TestEdge(unsigned int index, LXtEdgeID edge)	LXx_OVERRIDE;
-        LxResult    eltgrp_TestPoint(unsigned int index, LXtPointID point)	LXx_OVERRIDE;
 
         CLxUser_FalloffPacket falloff;
         CLxUser_Subject2Packet subject;
@@ -125,6 +117,11 @@ public:
     LxResult    tmod_Enable(ILxUnknownID obj) LXx_OVERRIDE;
 	void		tmod_Initialize (ILxUnknownID vts, ILxUnknownID adjust, unsigned flags) LXx_OVERRIDE;
     void        atrui_UIHints2(unsigned int index, CLxUser_UIHints& hints) LXx_OVERRIDE;
+    LxResult	atrui_DisableMsg (unsigned int index, ILxUnknownID msg) LXx_OVERRIDE;
+
+    LxResult    cui_Enabled           (const char *channelName, ILxUnknownID msg, ILxUnknownID item, ILxUnknownID read)	LXx_OVERRIDE;
+    LxResult    cui_DependencyCount   (const char *channelName, unsigned *count) LXx_OVERRIDE;
+    LxResult    cui_DependencyByIndex (const char *channelName, unsigned index, LXtItemType *depItemType, const char **depChannelName) LXx_OVERRIDE;
 
     using CLxDynamicAttributes::atrui_UIHints;  // to distinguish from the overloaded version in CLxImpl_AttributesUI
 
@@ -147,7 +144,5 @@ public:
 	LXtItemType m_itemType;
 
     static LXtTagInfoDesc descInfo[];
-    double m_offset0;
-    int     m_part;
 };
 

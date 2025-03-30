@@ -24,22 +24,11 @@ struct CParam
         DISCO_LOCKED  = 0x02,
     };
 
-#if 0
     enum : unsigned
     {
-        FLAG_SEAL     = 0x01,
-        FLAG_LAYOUT   = 0x02,
-        FLAG_USEMATR  = 0x0100,
-        FLAG_USEPART  = 0x0200,
-        FLAG_LOADLOCK = 0x80000
-    };
-#endif
-
-    enum : unsigned
-    {
-        METHOD_LSCM      = 0,
-        METHOD_ARAP      = 1,
-        METHOD_BORDER    = 2,
+        METHOD_BORDER    = 0,
+        METHOD_LSCM      = 1,
+        METHOD_ARAP      = 2,
         METHOD_SLIM      = 3
     };
 
@@ -60,12 +49,12 @@ struct CParam
     struct ParamVerx;
     struct ParamEdge;
     struct ParamTriangle;
-    struct ParamGroup;
+    struct ParamPart;
 
     typedef std::shared_ptr<ParamVerx>     ParamVerxID;
     typedef std::shared_ptr<ParamEdge>     ParamEdgeID;
     typedef std::shared_ptr<ParamTriangle> ParamTriangleID;
-    typedef std::shared_ptr<ParamGroup>    ParamGroupID;
+    typedef std::shared_ptr<ParamPart>     ParamPartID;
 
     struct ParamVerx
     {
@@ -73,10 +62,8 @@ struct CParam
         LXtPointID                    vrt;
         unsigned                      vrt_index;
         float                         value[2];   // texture coordinate value
- //       float                         value0[2];  // texture initial value
- //       float                         value1[2];  // value for working
         unsigned                      index;      // solver index
-        unsigned                      flags;      // LSCM flags
+        unsigned                      flags;      // flags for discos
         LXtMarkMode                   marks;      // marks for working
         float                         w;          // falloff weight
         LXtFVector                    pos;        // vertex corner position
@@ -99,7 +86,7 @@ struct CParam
         LXtPolygonID pol;
         int          pol_index;
         ParamVerxID  v0, v1, v2;
-        unsigned     group;  // group index
+        unsigned     part;  // part index
         double       area;
         void*        userData;  // any working data
         int          index;     // solver index
@@ -109,11 +96,11 @@ struct CParam
 
     struct ParamFace
     {
-        unsigned                     group;  // group index
+        unsigned                     part;  // part index
         std::vector<ParamTriangleID> tris;   // triangles of the face
     };
 
-    struct ParamGroup
+    struct ParamPart
     {
         unsigned       index;
         CLxBoundingBox box2D, box3D;
@@ -137,7 +124,7 @@ struct CParam
         std::vector<ParamVerxID>     discos;  // dico vertex of the triangles
     };
 
-    std::vector<ParamGroupID>    m_groups;
+    std::vector<ParamPartID>     m_parts;
     std::vector<ParamEdgeID>     m_edges;
     std::vector<ParamVerxID>     m_vertices;
     std::vector<ParamTriangleID> m_triangles;
@@ -149,22 +136,15 @@ struct CParam
     CLxUser_Polygon m_poly;
     CLxUser_Point   m_vert;
     unsigned int    m_flags;
-    double          m_region[4];
     double          m_size_w, m_size_h;
     double          m_scale;
     double          m_gaps;
     LXtMeshMapID    m_vmap_id;
     bool            m_layout;
-//    bool            m_keepAspect;
     bool            m_relax;
     LXtID4          m_type;
     std::string     m_name;
-
-    // initial projection
-//    unsigned        m_proj;
-//    unsigned        m_axis;
     unsigned        m_pinn;
-//    double          m_angle;
 
     LXtMarkMode m_pick;
     LXtMarkMode m_mark_done;
@@ -178,19 +158,12 @@ struct CParam
     {
         m_name = name;
         m_mesh.set(mesh);
- //       m_flags     = 0u;
-        m_region[0] = m_region[1] = 0.0;
-        m_region[2] = m_region[3] = 1.0;
         m_size_w = m_size_h = 1.0;
         m_scale  = 1.0;
         m_gaps   = 0.2;
         m_layout = false;
- //       m_keepAspect = true;
         m_type  = LXiSEL_EDGE;
         m_relax = false;
-
-    //    m_proj = PROJ_USEVMAP;
-    //    m_axis = 1;
         m_pinn = 0;
 
         m_poly.fromMesh(m_mesh);
@@ -212,7 +185,7 @@ struct CParam
         m_edges.clear();
         m_triangles.clear();
         m_faces.clear();
-        m_groups.clear();
+        m_parts.clear();
     }
 
     LxResult Setup(LXtMarkMode edge_mark, bool seal, bool relax);
@@ -229,15 +202,13 @@ struct CParam
     // V_o : initial 2d uv positions
     // b : pinned vertex indices
     // bc : 2d positions of pinnded vertices.
-    LxResult EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::MatrixXd& V_o, Eigen::VectorXi& b, Eigen::MatrixXd& bc);
- //   LxResult SetResult(ParamGroupID grp, Eigen::MatrixXd& V_o);
+    LxResult EgenMatrix(ParamPartID part, Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::MatrixXd& V_o, Eigen::VectorXi& b, Eigen::MatrixXd& bc);
 
     LxResult Apply(CLxUser_Mesh& edit_mesh, double gaps);
 
     // Make new triangles and replace the source mesh with them for debugging
     LxResult MakeParamMesh(CLxUser_Mesh& edit_mesh);
 
-//    LxResult         Project();
     LxResult         AddTriangle(LXtPolygonID pol, LXtPointID v0, LXtPointID v1, LXtPointID v2);
     LxResult         AddPolygon(LXtPolygonID pol);
     LXtPolygonID     TracePolygon(LXtPointID vrt, LXtPolygonID pol, int shift);
@@ -246,17 +217,11 @@ struct CParam
     ParamVerxID      AddVertex(LXtPointID vrt, LXtPolygonID pol, ParamTriangleID tri);
     bool             IsSeamEdge(CLxUser_Edge& edge);
     
-//    void             ProjectionAxis(CLxBoundingBox& box, LXtVector p1, LXtVector p2);
-    bool             LockVertex(ParamVerxID dv);
-//    unsigned int     ProjectPlanar(ParamGroupID grp, LXtMatrix& m);
-//    unsigned int     ProjectCylinder(ParamGroupID grp, LXtMatrix& m);
-//   unsigned int     ProjectSpherical(ParamGroupID grp, LXtMatrix& m);
     double           Layout(double gaps);
     bool             SetUVs(ParamTriangleID tri, double mag);
-    bool             FitGroup(ParamGroupID grp, unsigned N, std::vector<bool>& grid);
+    bool             FitPart(ParamPartID part, unsigned N, std::vector<bool>& grid);
     bool             ConnectPols(ParamVerxID dv, LXtPolygonID pol, const float* value);
-    void             SetGroupInfo(ParamGroupID grp);
-//    void             ScaleGroup(ParamGroupID grp);
-    void             GetPins(ParamGroupID grp, int pinn, ParamVerxID* pin1, ParamVerxID* pin2);
-    void             LoadUVs(ParamGroupID grp);
+    void             SetPart(ParamPartID part);
+    void             GetPins(ParamPartID part, int pinn, ParamVerxID* pin1, ParamVerxID* pin2);
+    void             LoadUVs(ParamPartID part);
 };

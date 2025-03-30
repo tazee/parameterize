@@ -66,7 +66,6 @@ public:
 
         mark_dupl = s_mesh.SetMode(LXsMARK_USER_0);
 
-        //printf("** ConstraintDelaunay\n");
         unsigned n = 0;
         for (auto i = 0u; i < nvert; i++)
         {
@@ -130,7 +129,6 @@ public:
             }
         }
 
-        //printf("cdt.is_valid (%d)\n", cdt.is_valid());
         if (!cdt.is_valid())
         {
             return LXe_FAILED;

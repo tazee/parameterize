@@ -1333,20 +1333,12 @@ static bool TriangleOriented (CLxUser_Mesh& mesh, AxisPlane& axisPlane, std::vec
 
 	for (auto i = 0u; i < points.size(); i++) {
 		LXtPointID v = points[i];
-
 		if ((v == v1) || (v == v2) || (v == v3))
 			continue;
-
-		if (TriangleCorner (mesh, axisPlane, orient, v2, v1, v)
-		 || TriangleCorner (mesh, axisPlane, orient, v1, v3, v)
-		 || TriangleCorner (mesh, axisPlane, orient, v3, v2, v))
-		{
-			continue;	/* point is outside */
-		}
-		else
-		{
-			return false;	/* point is inside */
-		}
+		if (!TriangleCorner (mesh, axisPlane, orient, v2, v1, v) &&
+            !TriangleCorner (mesh, axisPlane, orient, v1, v3, v) &&
+            !TriangleCorner (mesh, axisPlane, orient, v3, v2, v))
+			return false;
 	}
 	return true;
 }

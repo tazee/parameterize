@@ -38,11 +38,6 @@
 #define TEST_M(d,c,s)	((((d) & (s)) == s) && (((d) & (c)) == 0))
 #define TEST_MODE(d,m)	TEST_M(d,MM_CLEAR(m),MM_SET(m))
 
-//#define UNWRAP_MINU(a, b) ((a)[0] < (b)[0] || (!lx::Compare((a)[0], (b)[0]) && (a)[1] < (b)[1]))
-//#define UNWRAP_MINV(a, b) ((a)[1] < (b)[1] || (!lx::Compare((a)[1], (b)[1]) && (a)[0] < (b)[0]))
-//#define UNWRAP_MAXU(a, b) ((a)[0] > (b)[0] || (!lx::Compare((a)[0], (b)[0]) && (a)[1] > (b)[1]))
-//#define UNWRAP_MAXV(a, b) ((a)[1] > (b)[1] || (!lx::Compare((a)[1], (b)[1]) && (a)[0] > (b)[0]))
-
 
 class MarkEdgeVisitor : public CLxImpl_AbstractVisitor
 {
@@ -83,25 +78,6 @@ public:
         std::vector<LXtPointID> points;
 
         LXtPointID v0, v1, v2;
-        CLxUser_StringTag polyTag(m_poly);
-        if (std::string(polyTag.Value(LXi_PTAG_MATR)) == "NonAlign")
-        {
-            LXtVector norm;
-            m_poly.Normal(norm);
-            printf("{%s} norm %f %f %f\n", polyTag.Value(LXi_PTAG_MATR), norm[0], norm[1], norm[2]);
-            for (auto j = 0u; j < nvert; j++)
-            {
-                m_poly.VertexByIndex(j, &v0);
-                m_vert.Select(v0);
-                unsigned index;
-                m_vert.Index(&index);
-                if (!j)
-                    printf("[%u", index);
-                else
-                    printf(" %u", index);
-            }
-            printf("]\n");
-        }
         if (nvert == 3)
         {
             m_poly.VertexByIndex(0, &v0);
@@ -112,32 +88,17 @@ public:
         else if (MeshUtil::PolygonFixedVertexList(m_mesh, m_poly, points))
         {
             bool done = false;
-            if (nvert >= 4)
+            if (nvert > 4)
             {
                 LXtVector norm;
                 //MeshUtil::VertexListNormal(m_mesh, points, norm);
                 m_poly.Normal(norm);
-                if (std::string(polyTag.Value(LXi_PTAG_MATR)) == "NonAlign")
-                {
-                    printf("{%s} norm %f %f %f\n", polyTag.Value(LXi_PTAG_MATR), norm[0], norm[1], norm[2]);
-                    for (auto j = 0u; j < points.size(); j++)
-                    {
-                        m_vert.Select(points[j]);
-                        unsigned index;
-                        m_vert.Index(&index);
-                        if (!j)
-                            printf("[%u", index);
-                        else
-                            printf(" %u", index);
-                    }
-                    printf("]\n");
-                }
                 AxisPlane axisPlane(norm);
                 std::vector<std::vector<LXtPointID>> tris;
                 CTriangulate ctri(m_mesh);
                 LxResult result = ctri.EarClipping(axisPlane, points, tris);
-                if (std::string(polyTag.Value(LXi_PTAG_MATR)) == "NonAlign")
-                    printf("EarClipping ok (%d) polyID %p nvert = %u\n", (result == LXe_OK), m_poly.ID(), nvert);
+            //    if (std::string(polyTag.Value(LXi_PTAG_MATR)) == "NonAlign")
+            //        printf("EarClipping ok (%d) polyID %p nvert = %u\n", (result == LXe_OK), m_poly.ID(), nvert);
                 if (result == LXe_OK)
                 {
                     for (auto& vert : tris)
@@ -179,7 +140,7 @@ public:
     struct CParam*  m_context;
 };
 
-class GroupFaceVisitor : public CLxImpl_AbstractVisitor
+class PartFaceVisitor : public CLxImpl_AbstractVisitor
 {
 public:
     LxResult Evaluate()
@@ -198,11 +159,12 @@ public:
         if (m_poly.TestMarks(m_mark_done) == LXe_TRUE)
             return LXe_OK;
 
-        m_context->m_groups.push_back(std::make_shared<CParam::ParamGroup>());
-        CParam::ParamGroupID grp = m_context->m_groups.back();
-        grp->ix                   = m_context->m_region[0];
-        grp->iy                   = m_context->m_region[1];
-        grp->index                = static_cast<unsigned>(m_context->m_groups.size() - 1);
+        m_context->m_parts.push_back(std::make_shared<CParam::ParamPart>());
+        CParam::ParamPartID part = m_context->m_parts.back();
+
+        part->ix    = 0.0;
+        part->iy    = 0.0;
+        part->index = static_cast<unsigned>(m_context->m_parts.size() - 1);
 
         CLxUser_Polygon poly, poly1;
         poly.fromMesh(m_mesh);
@@ -218,7 +180,6 @@ public:
         LXtVector axis, norm;
         LXx_VCLR(axis);
 
-    printf("start m_groups %zu index (%u) polyID (%p)\n", m_context->m_groups.size(), grp->index, m_poly.ID());
         while (!stack.empty())
         {
             pol = stack.back();
@@ -227,11 +188,11 @@ public:
             poly.Normal(norm);
             LXx_VADD(axis, norm);
             CParam::ParamFace& face = m_context->m_faces[pol];
-            face.group               = grp->index;
+            face.part               = part->index;
             for(auto& tri : face.tris)
             {
-                tri->group = grp->index;
-                grp->tris.push_back(tri);
+                tri->part = part->index;
+                part->tris.push_back(tri);
             }
             unsigned int nvert = 0u, npol = 0u;
             poly.VertexCount(&nvert);
@@ -257,23 +218,19 @@ public:
                     poly1.SetMarks(m_mark_done);
                     if (poly1.TestMarks(m_context->m_mark_hide) == LXe_TRUE)
                         continue;
-//                    if (!(m_context->m_flags & CParam::FLAG_LOADLOCK))
- //                   {
-                        if (poly1.TestMarks(m_context->m_mark_lock) == LXe_TRUE)
-                            continue;
- //                   }
+                    if (poly1.TestMarks(m_context->m_mark_lock) == LXe_TRUE)
+                        continue;
                     if (m_context->m_type == LXiSEL_POLYGON)
                     {
                         if (m_context->m_pick && poly1.TestMarks(m_context->m_pick) == LXe_FALSE)
                             continue;
                     }
-                    //printf("-- push %p done (%d) to stack %zu\n", pol1, poly1.TestMarks(m_mark_done) == LXe_TRUE, stack.size());
                     stack.push_back(pol1);
                 }
             }
         }
 
-        printf("** m_triangles %zu group (%u)\n", m_context->m_triangles.size(), grp->index);
+        printf("** m_triangles %zu part (%u)\n", m_context->m_triangles.size(), part->index);
 
         return LXe_OK;
     }
@@ -321,12 +278,6 @@ LxResult CParam::AddTriangle(LXtPolygonID pol, LXtPointID v0, LXtPointID v1, LXt
         tri->pol_index, m_relax,
         dv[0]->vrt_index, dv[1]->vrt_index, dv[2]->vrt_index, 
         dv[0]->index, dv[1]->index, dv[2]->index);
-#endif
-#if 0
-    MathUtil::CrossNormal(cross, dv[0]->pos, dv[1]->pos, dv[2]->pos);
-    if (LXx_VDOT(norm, cross) < 0.0)
-        printf("AddTriangle norm dv %p %p %p v0 %p %p %p\n", 
-            dv[0]->vrt, dv[1]->vrt, dv[2]->vrt, v0, v1, v2);
 #endif
 
     CLxUser_Edge edge;
@@ -388,11 +339,8 @@ LXtPolygonID CParam::TracePolygon(LXtPointID vrt, LXtPolygonID pol, int shift)
                 poly.Select(pol1);
                 if (poly.TestMarks(m_mark_hide) == LXe_TRUE)
                     continue;
- //               if (!(m_flags & FLAG_LOADLOCK))
-//                {
-                    if (poly.TestMarks(m_mark_lock) == LXe_TRUE)
-                        continue;
- //               }
+                if (poly.TestMarks(m_mark_lock) == LXe_TRUE)
+                    continue;
                 if (pol1 != pol)
                 {
                     return pol1;
@@ -617,25 +565,24 @@ LxResult CParam::Setup(LXtMarkMode edge_mark, bool seal, bool relax)
     if (seal)
         SealHoles();
 
-    // divides polygons by seam edges in groups.
-    GroupFaceVisitor grpFace;
-    grpFace.m_mesh = m_mesh;
-    grpFace.m_vmap = m_vmap;
-    grpFace.m_poly.fromMesh(m_mesh);
-    grpFace.m_vert.fromMesh(m_mesh);
-    grpFace.m_mark_done = mesh_svc.SetMode(LXsMARK_USER_0);
-    grpFace.m_context = this;
-    grpFace.m_poly.Enum(&grpFace, LXiMARK_ANY);
+    // divides polygons by seam edges in parts.
+    PartFaceVisitor partFace;
+    partFace.m_mesh = m_mesh;
+    partFace.m_vmap = m_vmap;
+    partFace.m_poly.fromMesh(m_mesh);
+    partFace.m_vert.fromMesh(m_mesh);
+    partFace.m_mark_done = mesh_svc.SetMode(LXsMARK_USER_0);
+    partFace.m_context = this;
+    partFace.m_poly.Enum(&partFace, LXiMARK_ANY);
 
-    printf("** vertices %zu triangles %zu groups %zu faces %zu\n", m_vertices.size(), m_triangles.size(), m_groups.size(), m_faces.size());
-    // finalize group info
+    printf("** vertices %zu triangles %zu parts %zu faces %zu\n", m_vertices.size(), m_triangles.size(), m_parts.size(), m_faces.size());
+    // finalize part info
     for (auto& dv : m_vertices)
     {
- //       printf("dv %u group (%d) %zu\n", dv->index, dv->tri->group, m_groups.size());
-        auto& grp = m_groups[dv->tri->group];
-        grp->box3D.add(dv->pos);
-        grp->discos.push_back(dv);
-        dv->index = grp->discos.size() - 1;
+        auto& part = m_parts[dv->tri->part];
+        part->box3D.add(dv->pos);
+        part->discos.push_back(dv);
+        dv->index = part->discos.size() - 1;
     }
     //
     // Add dummpy triangles to seal holes.
@@ -646,22 +593,21 @@ LxResult CParam::Setup(LXtMarkMode edge_mark, bool seal, bool relax)
         {
             if (!tri->pol)
             {
-                tri->group = tri->v0->tri->group;
-                auto& grp = m_groups[tri->group];
-                grp->tris.push_back(tri);
+                tri->part = tri->v0->tri->part;
+                auto& part = m_parts[tri->part];
+                part->tris.push_back(tri);
             }
         }
     }
-    for (auto& grp : m_groups)
+    for (auto& part : m_parts)
     {
-        grp->scale  = 1.0;
-        grp->area3D = 0.0;
+        part->scale  = 1.0;
+        part->area3D = 0.0;
         for (auto& tri : m_triangles)
-            grp->area3D += tri->area;
-        grp->ox = m_region[0];
-        grp->oy = m_region[0];
-        SetGroupInfo (grp);
-//    printf("group (%d) tris (%zu) discos (%zu) area3D %f\n", grp->index, grp->tris.size(), grp->discos.size(), grp->area3D);
+            part->area3D += tri->area;
+        part->ox = 0.0;
+        part->oy = 0.0;
+        SetPart (part);
     }
     return LXe_OK;
 }
@@ -676,7 +622,6 @@ LxResult CParam::SealHoles()
     printf("SealHoles = %zu\n", loops.size());
     for (auto& loop : loops)
     {
-        printf("-- loop = %zu\n", loop.size());
         LXtPointID v0 = loop.front();
         for(auto i = 1u; i < loop.size()-1u; i++)
         {
@@ -688,23 +633,13 @@ LxResult CParam::SealHoles()
     return LXe_OK;
 }
 
-bool CParam::LockVertex(ParamVerxID dv)
-{
-    m_vert.Select(dv->vrt);
-    if (m_vert.TestMarks(m_mark_lock) == LXe_TRUE)
-    {
-        dv->flags |= DISCO_LOCKED;
-    }
-    return false;
-}
-
-void CParam::GetPins(ParamGroupID grp, int pinn, ParamVerxID* pin1, ParamVerxID* pin2)
+void CParam::GetPins(ParamPartID part, int pinn, ParamVerxID* pin1, ParamVerxID* pin2)
 {
     LXtVector center, extent;
     LXtVector p1, p2;
 
-    grp->box3D.center(center);
-    grp->box3D.extent(extent);
+    part->box3D.center(center);
+    part->box3D.extent(extent);
 
     LXx_VCPY(p1, center);
     LXx_VCPY(p2, center);
@@ -713,14 +648,13 @@ void CParam::GetPins(ParamGroupID grp, int pinn, ParamVerxID* pin1, ParamVerxID*
 
     double d1 = extent[pinn];
     double d2 = extent[pinn];
-    printf("** pin p1 %f %f %f p2 %f %f %f\n", p1[0], p1[1], p1[2], p2[0], p2[1], p2[2]);
 
     /*
      * Project onto shortest bbox axis, and lock extra vertices.
      */
-    for (auto i = 0u; i < grp->discos.size(); i++)
+    for (auto i = 0u; i < part->discos.size(); i++)
     {
-        auto& dv = grp->discos[i];
+        auto& dv = part->discos[i];
         if (i)
         {
             double d = LXx_VDIST(dv->pos, p1);
@@ -749,11 +683,11 @@ void CParam::GetPins(ParamGroupID grp, int pinn, ParamVerxID* pin1, ParamVerxID*
 //
 // Load UV values from the current UV map.
 //
-void CParam::LoadUVs(ParamGroupID grp)
+void CParam::LoadUVs(ParamPartID part)
 {
-    for (auto i = 0u; i < grp->discos.size(); i++)
+    for (auto i = 0u; i < part->discos.size(); i++)
     {
-        auto& dv = grp->discos[i];
+        auto& dv = part->discos[i];
         if (m_vmap.test())
         {
             float uv[2];
@@ -765,75 +699,9 @@ void CParam::LoadUVs(ParamGroupID grp)
             }
         }
     }
-    // Update group info using computed UV values.
-    SetGroupInfo (grp);
+    // Update part info using computed UV values.
+    SetPart (part);
 }
-
-#if 0
-LxResult CParam::Project()
-{
-    LXtMatrix m;
-    lx::MatrixIdent(m);
-    lx::MatrixRotate(m, m_angle, m_axis);
-
-    unsigned proj = m_proj;
-    if (proj == PROJ_USEVMAP)
-    {
-        if (m_vmap.SelectByName(LXi_VMAP_TEXTUREUV, m_name.c_str()) != LXe_OK)
-            proj = PROJ_PLANAR;
-    }
-
-    m_scale = 1.0;
-
-    for (auto& grp : m_groups)
-    {
-        unsigned int locked = 0;
-
-        switch (proj)
-        {
-            case PROJ_PLANAR:
-                locked = ProjectPlanar(grp, m);
-                break;
-
-            case PROJ_CYLINDRICAL:
-                locked = ProjectCylinder(grp, m);
-                break;
-
-            case PROJ_SPHERICAL:
-                locked = ProjectSpherical(grp, m);
-                break;
-
-            case PROJ_USEVMAP:
-                locked = ProjectUseVMap(grp);
-                break;
-
-            case PROJ_GROUPNORMAL:
-                locked = ProjectGroupNormal(grp);
-                break;
-        }
-
-        //
-        // Lock two vertices at least.
-        //
-        printf("-- locked (%d) vxmax (%u) vxmin (%u)\n", locked, grp->vxmax->index, grp->vxmin->index);
-        if (locked < 2)
-        {
-            grp->vxmax->flags |= LSCM_LOCKED;
-            grp->vxmin->flags |= LSCM_LOCKED;
-            printf("-- locked vxmax (%u) vxmin (%u)\n", grp->vxmax->index, grp->vxmin->index);
-        }
-
-        SetGroupInfo(grp);
-        ScaleGroup(grp);
-    }
-    for(auto& dv : m_vertices)
-    {
-        dv->value0[0] = dv->value[0];
-        dv->value0[1] = dv->value[1];
-    }
-    return LXe_OK;
-}
-#endif
 
 LxResult CParam::Apply(CLxUser_Mesh& edit_mesh, double gaps)
 {
@@ -850,7 +718,7 @@ LxResult CParam::Apply(CLxUser_Mesh& edit_mesh, double gaps)
     m_poly.fromMesh(edit_mesh);
     m_vert.fromMesh(edit_mesh);
 
-    // Layout computed groups and gets the entier scale.
+    // Layout computed parts and gets the entier scale.
     double mag = Layout(gaps);
 
     printf("Apply mag %f\n", mag);
@@ -919,14 +787,14 @@ LxResult CParam::MakeParamMesh(CLxUser_Mesh& edit_mesh)
     return LXe_OK;
 }
 
-LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::MatrixXd& V_o, Eigen::VectorXi& b, Eigen::MatrixXd& bc)
+LxResult CParam::EgenMatrix(ParamPartID part, Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::MatrixXd& V_o, Eigen::VectorXi& b, Eigen::MatrixXd& bc)
 {
     unsigned n = 0;
 
     // V : 3d vertex positions
-    V.resize(grp->discos.size(), 3);
+    V.resize(part->discos.size(), 3);
     n = 0;
-    for(auto& disco : grp->discos)
+    for(auto& disco : part->discos)
     {
         V(n, 0) = disco->pos[0];
         V(n, 1) = disco->pos[1];
@@ -934,11 +802,11 @@ LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixX
         n ++;
     }
     // F : vertex indices of triangles
-    F.resize(grp->tris.size(), 3);
+    F.resize(part->tris.size(), 3);
     n = 0;
-    if (grp->flipped == grp->tris.size())
+    if (part->flipped == part->tris.size())
     {
-        for(auto& tri : grp->tris)
+        for(auto& tri : part->tris)
         {
             F(n, 0) = tri->v0->index;
             F(n, 1) = tri->v2->index;
@@ -948,7 +816,7 @@ LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixX
     }
     else
     {
-        for(auto& tri : grp->tris)
+        for(auto& tri : part->tris)
         {
             F(n, 0) = tri->v0->index;
             F(n, 1) = tri->v1->index;
@@ -957,9 +825,9 @@ LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixX
         }
     }
     // V_o : initial projected UV positions
-    V_o.resize(grp->discos.size(), 2);
+    V_o.resize(part->discos.size(), 2);
     n = 0;
-    for(auto& disco : grp->discos)
+    for(auto& disco : part->discos)
     {
         V_o(n, 0) = disco->value[0];
         V_o(n, 1) = disco->value[1];
@@ -967,7 +835,7 @@ LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixX
     }
     // b, bc : pinned vertex incides and the positions
     n = 0;
-    for(auto& disco : grp->discos)
+    for(auto& disco : part->discos)
     {
         if (disco->flags & CParam::DISCO_LOCKED)
             n ++;
@@ -979,7 +847,7 @@ LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixX
     if (n > 0)
     {
         n = 0;
-        for(auto& disco : grp->discos)
+        for(auto& disco : part->discos)
         {
             if (disco->flags & CParam::DISCO_LOCKED)
             {
@@ -990,33 +858,15 @@ LxResult CParam::EgenMatrix(ParamGroupID grp, Eigen::MatrixXd& V, Eigen::MatrixX
         }
     }
     #endif
-    printf("Eigen V (%zu) F (%zu) V_o (%zu) b (%zu) bc (%zu)\n", V.size(), F.size(), V_o.size(), b.size(), bc.size());
-    printf("F cols(%td) rows (%td) V cols(%td) rows (%td)\n", F.cols(), F.rows(), V.cols(), V.rows());
+//    printf("Eigen V (%zu) F (%zu) V_o (%zu) b (%zu) bc (%zu)\n", V.size(), F.size(), V_o.size(), b.size(), bc.size());
+//    printf("F cols(%td) rows (%td) V cols(%td) rows (%td)\n", F.cols(), F.rows(), V.cols(), V.rows());
     return LXe_OK;
 }
-
-#if 0
-LxResult CParam::SetResult(ParamGroupID grp, Eigen::MatrixXd& V_o)
-{
-    if (V_o.size() != (grp->discos.size() * 2))
-        return LXe_FAILED;
-
-    unsigned n = 0;
-    for(auto& disco : grp->discos)
-    {
-        disco->value[0] = V_o(n, 0) ;
-        disco->value[1] = V_o(n, 1);
-    //    printf("[%u] uv %f %f (%f %f)\n", n, disco->value[0], disco->value[1], disco->value0[0], disco->value0[1]);
-        n ++;
-    }
-    return LXe_OK;
-}
-#endif
 
 double CParam::Layout(double gaps)
 {
     //
-    // Reset variables and sort groups by size.
+    // Reset variables and sort parts by size.
     //
     unsigned ix = 0u;
     unsigned iy = 1u;
@@ -1024,33 +874,33 @@ double CParam::Layout(double gaps)
     unsigned i;
     double   mag = 1.0;
 
-    std::sort(m_groups.begin(), m_groups.end(),
-        [&](ParamGroupID& grp1, ParamGroupID& grp2) { return grp1->size > grp2->size; });
+    std::sort(m_parts.begin(), m_parts.end(),
+        [&](ParamPartID& part1, ParamPartID& part2) { return part1->size > part2->size; });
 
-    ParamGroupID grp = m_groups[m_groups.size() * 9 / 10];
-    i = 8 - (std::log(m_groups.size()) / 0.693);
+    ParamPartID part = m_parts[m_parts.size() * 9 / 10];
+    i = 8 - (std::log(m_parts.size()) / 0.693);
     if (i > 1)
-        m_scale = grp->size / i;
+        m_scale = part->size / i;
     else
-        m_scale = grp->size;
+        m_scale = part->size;
 
     //
     // If the base scale size is less than 10 percent of the average size, 
     // take the average size/10.
     //
     double scale = 0.0;
-    for (i = 0u; i < m_groups.size(); i++)
+    for (i = 0u; i < m_parts.size(); i++)
     {
-        grp = m_groups[i];
-        scale += grp->size;
+        part = m_parts[i];
+        scale += part->size;
 
     }
-    scale = scale / static_cast<double>(m_groups.size()) * 0.1;
+    scale = scale / static_cast<double>(m_parts.size()) * 0.1;
     if (m_scale < scale)
         m_scale = scale;
 
     //
-    // Set the number of cells per group and compute the total
+    // Set the number of cells per part and compute the total
     // number required.
     //
     LXtVector center, extent;
@@ -1058,27 +908,27 @@ double CParam::Layout(double gaps)
     LXx_VCLR(extent);
 
     auto n = 0u, m = 0u;
-    for (i = 0u; i < m_groups.size(); i++)
+    for (i = 0u; i < m_parts.size(); i++)
     {
-        grp      = m_groups[i];
-        grp->mag = 1.0;
-        grp->box2D.extent(extent);
-        grp->box2D.center(center);
-        grp->nx  = std::ceil(extent[ix] / m_scale);
-        grp->ny  = std::ceil(extent[iy] / m_scale);
-        n += grp->nx * grp->ny;
+        part      = m_parts[i];
+        part->mag = 1.0;
+        part->box2D.extent(extent);
+        part->box2D.center(center);
+        part->nx  = std::ceil(extent[ix] / m_scale);
+        part->ny  = std::ceil(extent[iy] / m_scale);
+        n += part->nx * part->ny;
 
-        double dx = m_scale * grp->nx;
-        double dy = m_scale * grp->ny;
+        double dx = m_scale * part->nx;
+        double dy = m_scale * part->ny;
         center[ix] = center[ix] + (dx - extent[ix]) * 0.5;
         center[iy] = center[iy] + (dy - extent[iy]) * 0.5;
         extent[ix] = dx;
         extent[iy] = dy;
-        LXx_VADDS3(grp->box2D._min, center, extent, -0.5);
-        LXx_VADDS3(grp->box2D._max, center, extent,  0.5);
+        LXx_VADDS3(part->box2D._min, center, extent, -0.5);
+        LXx_VADDS3(part->box2D._max, center, extent,  0.5);
 
-        grp->box2D.extent(extent);
-        grp->box2D.center(center);
+        part->box2D.extent(extent);
+        part->box2D.center(center);
     }
 
     if (!n)
@@ -1096,23 +946,23 @@ double CParam::Layout(double gaps)
         for (i = 0u; i < n * n; i++)
             grid[i] = false;
 
-        for (i = 0u; i < m_groups.size(); i++)
+        for (i = 0u; i < m_parts.size(); i++)
         {
-            if (!FitGroup(m_groups[i], N, grid))
+            if (!FitPart(m_parts[i], N, grid))
                 break;
         }
 
-        if (i == m_groups.size())
+        if (i == m_parts.size())
             break;
 
         //
         // Choose a grid size increment that will accommodate the remaining area.
         //
         ix = n * n;
-        for (i = 0u; i < m_groups.size(); i++)
+        for (i = 0u; i < m_parts.size(); i++)
         {
-            grp = m_groups[i];
-            ix += grp->nx * grp->ny;
+            part = m_parts[i];
+            ix += part->nx * part->ny;
         }
         ix = static_cast<unsigned>(std::ceil(std::sqrt(ix))) - n;
         n += std::max(ix, 1u);
@@ -1120,10 +970,6 @@ double CParam::Layout(double gaps)
             break;
     }
 
-    //
-    // We count the number of unused edge strips and calculate an expansion 
-    // factor to ensure that the data fits snugly.
-    //
     if (N > 2)
     {
         i = 1;
@@ -1147,24 +993,23 @@ double CParam::Layout(double gaps)
     else
         mag = 1.0;
 
-    s_log.DebugOut(LXi_DBLOG_NORMAL, "-- mag = %f N = %d n = %d\n", mag, N, n);
-    std::sort(m_groups.begin(), m_groups.end(),
-        [&](ParamGroupID& grp1, ParamGroupID& grp2) { return grp1->index < grp2->index; });
+    std::sort(m_parts.begin(), m_parts.end(),
+        [&](ParamPartID& part1, ParamPartID& part2) { return part1->index < part2->index; });
 
     //
-    // Set group position and size.
+    // Set part position and size.
     //
-    for (i = 0u; i < m_groups.size(); i++)
+    for (i = 0u; i < m_parts.size(); i++)
     {
-        grp = m_groups[i];
+        part = m_parts[i];
         if (!m_layout)
         {
-            grp->x0  = (grp->k0 % N + grp->nx / 2.0) * (1.0 / N);
-            grp->y0  = (grp->k0 / N + grp->ny / 2.0) * (1.0 / N);
+            part->x0  = (part->k0 % N + part->nx / 2.0) * (1.0 / N);
+            part->y0  = (part->k0 / N + part->ny / 2.0) * (1.0 / N);
         }
-        grp->wx  = (grp->nx * grp->nx) / static_cast<double>(N * (grp->nx + gaps));
-        grp->wy  = (grp->ny * grp->ny) / static_cast<double>(N * (grp->ny + gaps));
-        grp->mag = mag;
+        part->wx  = (part->nx * part->nx) / static_cast<double>(N * (part->nx + gaps));
+        part->wy  = (part->ny * part->ny) / static_cast<double>(N * (part->ny + gaps));
+        part->mag = mag;
     }
 
     m_layout = true;
@@ -1173,73 +1018,48 @@ double CParam::Layout(double gaps)
 }
 
 
-void CParam::SetGroupInfo(ParamGroupID grp)
+void CParam::SetPart(ParamPartID part)
 {
     double area3D = 0.0;
     double area2D = 0.0;
-    grp->flipped = 0;
-    for(auto& tri : grp->tris)
+    part->flipped = 0;
+    for(auto& tri : part->tris)
     {
         area3D += tri->area;
         double a = MathUtil::AreaTriangle2D(tri->v0->value[0], tri->v0->value[1], 
                     tri->v1->value[0], tri->v1->value[1], tri->v2->value[0], tri->v2->value[1]);
         area2D += std::abs(a);
         if (a < 0.0)
-            grp->flipped ++;
+            part->flipped ++;
     }
     if (area3D > 0.0 && area2D > 0.0)
-        grp->scale = std::sqrt(area3D / area2D) / m_scale;
+        part->scale = std::sqrt(area3D / area2D) / m_scale;
     else
-        grp->scale = 1.0;
+        part->scale = 1.0;
 
-    grp->area2D = area2D;
-    grp->area3D = area3D;
-    grp->box2D.clear();
+    part->area2D = area2D;
+    part->area3D = area3D;
+    part->box2D.clear();
 
     LXtVector fv;
 
-    for(auto& dv : grp->discos)
+    for(auto& dv : part->discos)
     {
         LXx_VSET3(fv, dv->value[0], dv->value[1], 0);
-        grp->box2D.add(fv);
+        part->box2D.add(fv);
     }
     LXtVector extent, center;
-    grp->box2D.extent(extent);
-    grp->box2D.center(center);
-    grp->nx   = 0;
-    grp->ny   = 0;
-    grp->size = std::max(extent[0], extent[1]);
+    part->box2D.extent(extent);
+    part->box2D.center(center);
+    part->nx   = 0;
+    part->ny   = 0;
+    part->size = std::max(extent[0], extent[1]);
 
-    grp->ox = m_region[0];
-    grp->oy = m_region[1];
+    part->ox = 0.0;
+    part->oy = 0.0;
 }
 
-#if 0
-void CParam::ScaleGroup(ParamGroupID grp)
-{
-    if (grp->locked)
-        return;
-
-    LXtVector fv, center, extent;
-    grp->box2D.center(center);
-    LXx_VCLR(fv);
-
-    grp->box2D.clear();
-    for(auto& dv : grp->discos)
-    {
-        fv[0] = (dv->value[0] - center[0]) * grp->scale + center[0];
-        fv[1] = (dv->value[1] - center[1]) * grp->scale + center[1];
-        grp->box2D.add(fv);
-        dv->value[0] = fv[0];
-        dv->value[1] = fv[1];
-    }
-
-    grp->box2D.extent(extent);
-    grp->size = std::max(extent[0], extent[1]);
-}
-#endif
-
-bool CParam::FitGroup(ParamGroupID grp, unsigned N, std::vector<bool>& grid)
+bool CParam::FitPart(ParamPartID part, unsigned N, std::vector<bool>& grid)
 {
     unsigned n, k, l, ok;
     unsigned x0, y0, ix, iy;
@@ -1252,12 +1072,12 @@ bool CParam::FitGroup(ParamGroupID grp, unsigned N, std::vector<bool>& grid)
 
         x0 = k % N;
         y0 = k / N;
-        if (x0 + grp->nx >= N || y0 + grp->ny >= N)
+        if (x0 + part->nx >= N || y0 + part->ny >= N)
             continue;
 
         ok = 1;
-        for (ix = 0; ok && ix < grp->nx; ix++)
-            for (iy = 0; ok && iy < grp->ny; iy++)
+        for (ix = 0; ok && ix < part->nx; ix++)
+            for (iy = 0; ok && iy < part->ny; iy++)
             {
                 l = (iy + y0) * N + ix + x0;
                 if (grid[l])
@@ -1267,9 +1087,9 @@ bool CParam::FitGroup(ParamGroupID grp, unsigned N, std::vector<bool>& grid)
         if (!ok)
             continue;
 
-        grp->k0 = k;
-        for (ix = 0; ok && ix < grp->nx; ix++)
-            for (iy = 0; ok && iy < grp->ny; iy++)
+        part->k0 = k;
+        for (ix = 0; ok && ix < part->nx; ix++)
+            for (iy = 0; ok && iy < part->ny; iy++)
             {
                 l       = (iy + y0) * N + ix + x0;
                 grid[l] = true;
@@ -1314,8 +1134,8 @@ bool CParam::ConnectPols(ParamVerxID dv, LXtPolygonID pol, const float* value)
 
 bool CParam::SetUVs(ParamTriangleID tri, double mag)
 {
-    ParamGroupID& grp = m_groups[tri->group];
-    if (grp->locked)
+    ParamPartID& part = m_parts[tri->part];
+    if (part->locked)
         return false;
 
     float         x, y;
@@ -1323,19 +1143,19 @@ bool CParam::SetUVs(ParamTriangleID tri, double mag)
     const int     ix = 0, iy = 1;
 
     LXtVector center, extent;
-    grp->box2D.center(center);
-    grp->box2D.extent(extent);
+    part->box2D.center(center);
+    part->box2D.extent(extent);
 
     m_poly.Select(tri->pol);
 
     if (!m_layout)
     {
-        value0[0] = tri->v0->value[0] * m_size_w + grp->ox;
-        value0[1] = tri->v0->value[1] * m_size_h + grp->oy;
-        value1[0] = tri->v1->value[0] * m_size_w + grp->ox;
-        value1[1] = tri->v1->value[1] * m_size_h + grp->oy;
-        value2[0] = tri->v2->value[0] * m_size_w + grp->ox;
-        value2[1] = tri->v2->value[1] * m_size_h + grp->oy;
+        value0[0] = tri->v0->value[0] * m_size_w + part->ox;
+        value0[1] = tri->v0->value[1] * m_size_h + part->oy;
+        value1[0] = tri->v1->value[0] * m_size_w + part->ox;
+        value1[1] = tri->v1->value[1] * m_size_h + part->oy;
+        value2[0] = tri->v2->value[0] * m_size_w + part->ox;
+        value2[1] = tri->v2->value[1] * m_size_h + part->oy;
         if (m_type == LXiSEL_POLYGON)
         {
             ConnectPols(tri->v0, tri->pol, value0);
@@ -1351,22 +1171,22 @@ bool CParam::SetUVs(ParamTriangleID tri, double mag)
         // v0 of triangle
         x         = (tri->v0->value[ix] - center[ix]) / extent[ix];
         y         = (tri->v0->value[iy] - center[iy]) / extent[iy];
-        value0[0] = (grp->x0 + grp->wx * x) * mag * m_size_w + grp->ox;
-        value0[1] = (grp->y0 + grp->wy * y) * mag * m_size_h + grp->oy;
+        value0[0] = (part->x0 + part->wx * x) * mag * m_size_w + part->ox;
+        value0[1] = (part->y0 + part->wy * y) * mag * m_size_h + part->oy;
         m_poly.SetMapValue(tri->v0->vrt, m_vmap_id, value0);
 
         // v1 of triangle
         x         = (tri->v1->value[ix] - center[ix]) / extent[ix];
         y         = (tri->v1->value[iy] - center[iy]) / extent[iy];
-        value1[0] = (grp->x0 + grp->wx * x) * mag * m_size_w + grp->ox;
-        value1[1] = (grp->y0 + grp->wy * y) * mag * m_size_h + grp->oy;
+        value1[0] = (part->x0 + part->wx * x) * mag * m_size_w + part->ox;
+        value1[1] = (part->y0 + part->wy * y) * mag * m_size_h + part->oy;
         m_poly.SetMapValue(tri->v1->vrt, m_vmap_id, value1);
 
         // v2 of triangle
         x         = (tri->v2->value[ix] - center[ix]) / extent[ix];
         y         = (tri->v2->value[iy] - center[iy]) / extent[iy];
-        value2[0] = (grp->x0 + grp->wx * x) * mag * m_size_w + grp->ox;
-        value2[1] = (grp->y0 + grp->wy * y) * mag * m_size_h + grp->oy;
+        value2[0] = (part->x0 + part->wx * x) * mag * m_size_w + part->ox;
+        value2[1] = (part->y0 + part->wy * y) * mag * m_size_h + part->oy;
         m_poly.SetMapValue(tri->v2->vrt, m_vmap_id, value2);
     }
 
@@ -1411,16 +1231,13 @@ static Mesh::Halfedge_index GetLongestHalfEdge (Mesh& mesh)
 //
 LxResult CParam::LSCM(int pinn)
 {
-    // Project the UVs
-//    Project();
-
     printf("LSCM\n");
-    // Parameterize the UVs of each group
-    for(auto& grp : m_groups)
+    // Parameterize the UVs of each part
+    for(auto& part : m_parts)
     {
         ParamVerxID pin1, pin2;
 
-        GetPins(grp, pinn, &pin1, &pin2);
+        GetPins(part, pinn, &pin1, &pin2);
 
         Mesh mesh;
 
@@ -1429,7 +1246,7 @@ LxResult CParam::LSCM(int pinn)
         std::pair<ParamVerxID, Mesh::Vertex_index> fixed2{};
 
         // Setup CGAL Surface Mesh
-        for (auto& dv : grp->discos)
+        for (auto& dv : part->discos)
         {
             auto v = mesh.add_vertex(Point_3(dv->pos[0], dv->pos[1], dv->pos[2]));
             index_map.insert(std::make_pair(dv, v));
@@ -1438,7 +1255,7 @@ LxResult CParam::LSCM(int pinn)
             if (dv == pin2)
                 fixed2 = std::make_pair(dv, v);
         }
-        for (auto& tri : grp->tris)
+        for (auto& tri : part->tris)
         {
             Mesh::Vertex_index v0 = index_map[tri->v0];
             Mesh::Vertex_index v1 = index_map[tri->v1];
@@ -1447,7 +1264,7 @@ LxResult CParam::LSCM(int pinn)
             printf("add face (%u) %u %u %u\n", tri->index, tri->v0->vrt_index, tri->v1->vrt_index, tri->v2->vrt_index);
             mesh.add_face(v0, v1, v2);
         }
-        printf("-- group discos = %zu tris = %zu\n", grp->discos.size(), grp->tris.size());
+        printf("-- part discos = %zu tris = %zu\n", part->discos.size(), part->tris.size());
         printf("   fixed1 %u fixed2 %u\n", fixed1.first->vrt_index, fixed2.first->vrt_index);
 
         // Get the longest halfedge on the border
@@ -1455,7 +1272,7 @@ LxResult CParam::LSCM(int pinn)
         if (!bhd.is_valid())
         {
             printf("LSCM No border edge\n");
-            grp->locked = true;
+            part->locked = true;
 	        continue;
         }
 
@@ -1503,13 +1320,13 @@ LxResult CParam::LSCM(int pinn)
 
         for (const auto& v : mesh.vertices()) {
             const Point_2& uv = uv_map[v];
-            auto& dv = grp->discos[v];
+            auto& dv = part->discos[v];
             dv->value[0] = uv.x();
             dv->value[1] = uv.y();
         }
         
-        // Update group info using computed UV values.
-        SetGroupInfo (grp);
+        // Update part info using computed UV values.
+        SetPart (part);
     }
 	return LXe_OK;
 }
@@ -1520,20 +1337,20 @@ LxResult CParam::LSCM(int pinn)
 LxResult CParam::ARAP()
 {
     printf("ARAP\n");
-    // Parameterize the UVs of each group
-    for(auto& grp : m_groups)
+    // Parameterize the UVs of each part
+    for(auto& part : m_parts)
     {
         Mesh mesh;
 
         std::unordered_map<ParamVerxID, Mesh::Vertex_index> index_map;
 
         // Setup CGAL Surface Mesh
-        for (auto& dv : grp->discos)
+        for (auto& dv : part->discos)
         {
             auto v = mesh.add_vertex(Point_3(dv->pos[0], dv->pos[1], dv->pos[2]));
             index_map.insert(std::make_pair(dv, v));
         }
-        for (auto& tri : grp->tris)
+        for (auto& tri : part->tris)
         {
             Mesh::Vertex_index v0 = index_map[tri->v0];
             Mesh::Vertex_index v1 = index_map[tri->v1];
@@ -1546,7 +1363,7 @@ LxResult CParam::ARAP()
         if (!bhd.is_valid())
         {
             printf("ARAP No border edge\n");
-            grp->locked = true;
+            part->locked = true;
 	        continue;
         }
 
@@ -1593,13 +1410,13 @@ LxResult CParam::ARAP()
 
         for (const auto& v : mesh.vertices()) {
             const Point_2& uv = uv_map[v];
-            auto& dv = grp->discos[v];
+            auto& dv = part->discos[v];
             dv->value[0] = uv.x();
             dv->value[1] = uv.y();
         }
         
-        // Update group info using computed UV values.
-        SetGroupInfo (grp);
+        // Update part info using computed UV values.
+        SetPart (part);
     }
 	return LXe_OK;
 }
@@ -1610,20 +1427,20 @@ LxResult CParam::ARAP()
 LxResult CParam::Border(unsigned border, unsigned param)
 {
     printf("BORDER\n");
-    // Parameterize the UVs of each group
-    for(auto& grp : m_groups)
+    // Parameterize the UVs of each part
+    for(auto& part : m_parts)
     {
         Mesh mesh;
 
         std::unordered_map<ParamVerxID, Mesh::Vertex_index> index_map;
 
         // Setup CGAL Surface Mesh
-        for (auto& dv : grp->discos)
+        for (auto& dv : part->discos)
         {
             auto v = mesh.add_vertex(Point_3(dv->pos[0], dv->pos[1], dv->pos[2]));
             index_map.insert(std::make_pair(dv, v));
         }
-        for (auto& tri : grp->tris)
+        for (auto& tri : part->tris)
         {
             Mesh::Vertex_index v0 = index_map[tri->v0];
             Mesh::Vertex_index v1 = index_map[tri->v1];
@@ -1636,7 +1453,7 @@ LxResult CParam::Border(unsigned border, unsigned param)
         if (!bhd.is_valid())
         {
             printf("ARAP No border edge\n");
-            grp->locked = true;
+            part->locked = true;
 	        continue;
         }
 
@@ -1742,7 +1559,7 @@ LxResult CParam::Border(unsigned border, unsigned param)
 
         for (const auto& v : mesh.vertices()) {
             const Point_2& uv = uv_map[v];
-            auto& dv = grp->discos[v];
+            auto& dv = part->discos[v];
             // Flipped UVs with Square mode. (CGAL Bug?)
             if (border == BORDER_SQUARE)
                 dv->value[0] = 1.0 - uv.x();
@@ -1751,8 +1568,8 @@ LxResult CParam::Border(unsigned border, unsigned param)
             dv->value[1] = uv.y();
         }
         
-        // Update group info using computed UV values.
-        SetGroupInfo (grp);
+        // Update part info using computed UV values.
+        SetPart (part);
     }
 	return LXe_OK;
 }
@@ -1764,20 +1581,20 @@ LxResult CParam::Border(unsigned border, unsigned param)
 LxResult CParam::FMVC()
 {
     printf("FMVC\n");
-    // Parameterize the UVs of each group
-    for(auto& grp : m_groups)
+    // Parameterize the UVs of each part
+    for(auto& part : m_parts)
     {
         Mesh mesh;
 
         std::unordered_map<ParamVerxID, Mesh::Vertex_index> index_map;
 
         // Setup CGAL Surface Mesh
-        for (auto& dv : grp->discos)
+        for (auto& dv : part->discos)
         {
             auto v = mesh.add_vertex(Point_3(dv->pos[0], dv->pos[1], dv->pos[2]));
             index_map.insert(std::make_pair(dv, v));
         }
-        for (auto& tri : grp->tris)
+        for (auto& tri : part->tris)
         {
             Mesh::Vertex_index v0 = index_map[tri->v0];
             Mesh::Vertex_index v1 = index_map[tri->v1];
@@ -1790,7 +1607,7 @@ LxResult CParam::FMVC()
         if (!bhd.is_valid())
         {
             printf("FMVC No border edge\n");
-            grp->locked = true;
+            part->locked = true;
 	        continue;
         }
 
@@ -1827,13 +1644,13 @@ LxResult CParam::FMVC()
 
         for (const auto& v : mesh.vertices()) {
             const Point_2& uv = uv_map[v];
-            auto& dv = grp->discos[v];
+            auto& dv = part->discos[v];
             dv->value[0] = uv.x();
             dv->value[1] = uv.y();
         }
         
-        // Update group info using computed UV values.
-        SetGroupInfo (grp);
+        // Update part info using computed UV values.
+        SetPart (part);
     }
 	return LXe_OK;
 }
@@ -1848,12 +1665,12 @@ LxResult CParam::SLIM(int iter)
             return result;
     }
 
-    for(auto& grp : m_groups)
+    for(auto& part : m_parts)
     {
         // Load UVs from the current map for the relax mode.
         if (m_relax == true)
         {
-            LoadUVs(grp);
+            LoadUVs(part);
         }
 
         igl::SLIMData slim_data;
@@ -1861,7 +1678,7 @@ LxResult CParam::SLIM(int iter)
         printf("SLIM iter (%d)\n", iter);
         // Set vertex positions, triangle indices, initial UVs, locked UVs and the indices into
         // Eigen matrices.
-        EgenMatrix(grp, slim_data.V, slim_data.F, slim_data.V_o, slim_data.b, slim_data.bc);
+        EgenMatrix(part, slim_data.V, slim_data.F, slim_data.V_o, slim_data.b, slim_data.bc);
 
         // Pre-compute slim data
         slim_data.slim_energy = igl::SYMMETRIC_DIRICHLET;
@@ -1883,14 +1700,13 @@ LxResult CParam::SLIM(int iter)
                       b,
                       bc,
                       slim_data.soft_const_p);
-#if 1
+#if 0
     printf("** slim_data\n");
     printf("   V %zu\n", slim_data.V.size());
     printf("   F %zu\n", slim_data.F.size());
     printf("   slim_energy %u\n", slim_data.slim_energy);
     printf("   b %zu\n", slim_data.b.size());
     printf("   bc %zu\n", slim_data.bc.size());
- //   printf("   soft_const_p %f\n", slim_data.soft_const_p);
     printf("   exp_factor %f\n", slim_data.exp_factor);
     printf("   mesh_improvement_3d %d\n", slim_data.mesh_improvement_3d);
     printf("   first_solve %d\n", slim_data.first_solve);
@@ -1916,17 +1732,17 @@ LxResult CParam::SLIM(int iter)
 	        return LXe_FAILED;
         }
 
-        // Push back the unwrapped UVs to group.
+        // Push back the unwrapped UVs to part.
         unsigned n = 0;
-        for(auto& disco : grp->discos)
+        for(auto& disco : part->discos)
         {
             disco->value[0] = slim_data.V_o(n, 0);
             disco->value[1] = slim_data.V_o(n, 1);
             n ++;
         }
         
-        // Update group info using computed UV values.
-        SetGroupInfo (grp);
+        // Update part info using computed UV values.
+        SetPart (part);
     }
 	return LXe_OK;
 }

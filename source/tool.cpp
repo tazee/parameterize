@@ -12,9 +12,9 @@
 CTool::CTool()
 {
     static LXtTextValueHint method_hint[] = {
+        { CParam::METHOD_BORDER, "border" }, 
         { CParam::METHOD_LSCM, "lscm" }, 
         { CParam::METHOD_ARAP, "arap" }, 
-        { CParam::METHOD_BORDER, "border" }, 
         { CParam::METHOD_SLIM, "slim" }, 
         { 0, "=parameterize_method" }, 
         { 0, nullptr },
@@ -32,7 +32,7 @@ CTool::CTool()
         { CParam::PARAM_DISCRETE_AUTHANLIC, "area" },
         { CParam::PARAM_MVC, "smooth" },
         { CParam::PARAM_BARYCENTRIC, "fast" },
-        { 0, "=parameterize_border" },
+        { 0, "=parameterize_param" },
         { 0, nullptr },
     };
 
@@ -79,9 +79,6 @@ CTool::CTool()
 	offset_event  = sPkt.GetOffset (LXsCATEGORY_TOOL, LXsP_TOOL_EVENTTRANS);
 	offset_center = sPkt.GetOffset (LXsCATEGORY_TOOL, LXsP_TOOL_ACTCENTER);
     mode_select = sMesh.SetMode("select");
-
-    m_part    = -1;
-    m_offset0 = 0.0;
 }
 
 /*
@@ -90,7 +87,7 @@ CTool::CTool()
 void CTool::tool_Reset()
 {
     dyna_Value(ATTRa_NAME).SetString("Texture");
-    dyna_Value(ATTRa_METHOD).SetInt(CParam::METHOD_LSCM);
+    dyna_Value(ATTRa_METHOD).SetInt(CParam::METHOD_BORDER);
     dyna_Value(ATTRa_BORDER).SetInt(CParam::BORDER_CIRCULAR);
     dyna_Value(ATTRa_PARAM).SetInt(CParam::PARAM_DISCRETE_CONFORMAL);
     dyna_Value(ATTRa_SEAL).SetInt(1);
@@ -225,6 +222,44 @@ void CTool::atrui_UIHints2(unsigned int index, CLxUser_UIHints& hints)
     }
 }
 
+LxResult CTool::atrui_DisableMsg (unsigned int index, ILxUnknownID msg)
+{
+    CLxUser_Message		 message (msg);
+
+    int method;
+    dyna_Value(ATTRa_METHOD).GetInt(&method);
+
+    switch (index) {
+        case ATTRa_BORDER:
+        case ATTRa_PARAM:
+            if (method != CParam::METHOD_BORDER)
+            {
+                message.SetCode (LXe_DISABLED);
+                message.SetMessage ("tool.skeleton", "OnlyBorder", 0);
+                return LXe_DISABLED;
+            }
+            break;
+        case ATTRa_ITERATION:
+        case ATTRa_RELAX:
+            if (method != CParam::METHOD_SLIM)
+            {
+                message.SetCode (LXe_DISABLED);
+                message.SetMessage ("tool.skeleton", "OnlySlim", 0);
+                return LXe_DISABLED;
+            }
+            break;
+        case ATTRa_PINN:
+            if (method != CParam::METHOD_LSCM)
+            {
+                message.SetCode (LXe_DISABLED);
+                message.SetMessage ("tool.skeleton", "OnlyLscm", 0);
+                return LXe_DISABLED;
+            }
+            break;
+    }
+    return LXe_OK;
+}
+
 bool CTool::TestPolygon()
 {
     /*
@@ -260,6 +295,83 @@ bool CTool::TestPolygon()
      * Return false if there is no polygons in any active layers.
      */
     return ok;
+}
+
+LxResult CTool::cui_Enabled (const char *channelName, ILxUnknownID msg_obj, ILxUnknownID item_obj, ILxUnknownID read_obj)
+{
+	CLxUser_Item	 	 item (item_obj);
+	CLxUser_ChannelRead	 chan_read (read_obj);
+
+    std::string name(channelName);
+
+	if ((name == ATTRs_BORDER) || (name == ATTRs_PARAM))
+    {
+        if ((chan_read.IValue (item, ATTRs_METHOD) != CParam::METHOD_BORDER))
+		    return LXe_CMD_DISABLED;
+    }
+	else if ((name == ATTRs_ITERATION) || (name == ATTRs_RELAX))
+    {
+        if ((chan_read.IValue (item, ATTRs_METHOD) != CParam::METHOD_SLIM))
+		    return LXe_CMD_DISABLED;
+    }
+	else if ((name == ATTRs_PINN))
+    {
+        if ((chan_read.IValue (item, ATTRs_METHOD) != CParam::METHOD_LSCM))
+		    return LXe_CMD_DISABLED;
+    }
+	
+	return LXe_OK;
+}
+
+LxResult CTool::cui_DependencyCount (const char *channelName, unsigned *count)
+{
+	count[0] = 0;
+
+	if (std::string(channelName) == ATTRs_BORDER)
+		count[0] = 1;
+	else if (std::string(channelName) == ATTRs_PARAM)
+		count[0] = 1;
+	else if (std::string(channelName) == ATTRs_ITERATION)
+		count[0] = 1;
+	else if (std::string(channelName) == ATTRs_RELAX)
+		count[0] = 1;
+	else if (std::string(channelName) == ATTRs_PINN)
+		count[0] = 1;
+	
+	return LXe_OK;
+}
+
+LxResult CTool::cui_DependencyByIndex (const char *channelName, unsigned index, LXtItemType *depItemType, const char **depChannel)
+{
+	depItemType[0] = m_itemType;
+	
+	if (std::string(channelName) == ATTRs_BORDER)
+	{
+		depChannel[0] = ATTRs_METHOD;
+		return LXe_OK;
+	}
+	else if (std::string(channelName) == ATTRs_PARAM)
+	{
+		depChannel[0] = ATTRs_METHOD;
+		return LXe_OK;
+	}
+	else if (std::string(channelName) == ATTRs_ITERATION)
+	{
+		depChannel[0] = ATTRs_METHOD;
+		return LXe_OK;
+	}
+	else if (std::string(channelName) == ATTRs_RELAX)
+	{
+		depChannel[0] = ATTRs_METHOD;
+		return LXe_OK;
+	}
+	else if (std::string(channelName) == ATTRs_PINN)
+	{
+		depChannel[0] = ATTRs_METHOD;
+		return LXe_OK;
+	}
+		
+	return LXe_OUTOFBOUNDS;
 }
 
 /*
@@ -311,20 +423,20 @@ LxResult CToolOp::top_Evaluate(ILxUnknownID vts)
         LxResult result = LXe_OK;
 
         // Export triangle mesh for debugging
-        if (1)
+        if (0)
         {
             param.MakeParamMesh(edit_mesh);
             scan.SetMeshChange(i, LXf_MESHEDIT_GEOMETRY);
             continue;
         }
 
-        // Parameterize using LSCM method
-        if (m_method == CParam::METHOD_LSCM)
+        // Parameterize using the specific method
+        if (m_method == CParam::METHOD_BORDER)
+            result = param.Border(static_cast<unsigned>(m_border), static_cast<unsigned>(m_param));
+        else if (m_method == CParam::METHOD_LSCM)
             result = param.LSCM(m_pinn);
         else if (m_method == CParam::METHOD_ARAP)
             result = param.ARAP();
-        else if (m_method == CParam::METHOD_BORDER)
-            result = param.Border(static_cast<unsigned>(m_border), static_cast<unsigned>(m_param));
         else if (m_method == CParam::METHOD_SLIM)
             result = param.SLIM(m_iter);
 
@@ -345,66 +457,11 @@ LxResult CToolOp::top_Evaluate(ILxUnknownID vts)
 
         pkt_vmap.autoInit();
         void* packet = pkt_vmap.Packet(LXi_VMAP_TEXTUREUV, m_name.c_str());
-        printf("** packet (%p) (%s)\n", packet, m_name.c_str());
 	    LXtID4 selID = s_sel.LookupType (LXsSELTYP_VERTEXMAP);
         s_sel.Drop(selID);
         s_sel.Select(selID, packet);
     }
     return LXe_OK;
-}
-
-LxResult CToolOp::eltgrp_GroupCount(unsigned int* count)
-{
-    count[0] = 4;
-    return LXe_OK;
-}
-
-LxResult CToolOp::eltgrp_GroupName(unsigned int index, const char** name)
-{
-    const static char* names[] = {"newPoly",
-                            "newEdge",
-                            "newVerx"};
-    name[0] = names[index];
-    return LXe_OK;
-}
-
-LxResult CToolOp::eltgrp_GroupUserName(unsigned int index, const char** username)
-{
-    const static char* names[] = {"@tool.offset@newPoly@0",
-                            "@tool.offset@newEdge@",
-                            "@tool.offset@newVerx@"};
-    username[0] = names[index];
-    return LXe_OK;
-}
-
-LxResult CToolOp::eltgrp_TestPolygon(unsigned int index, LXtPolygonID polygon)
-{
-    if (index == 0)
-    {
-        if (m_polygon_set.find(polygon) != m_polygon_set.end())
-            return LXe_TRUE;
-    }
-    return LXe_FALSE;
-}
-
-LxResult CToolOp::eltgrp_TestEdge(unsigned int index, LXtEdgeID edge)
-{
-	LXtPointID   p0, p1;
-
-    m_cedge.Select(edge);
-    m_cedge.Endpoints(&p0, &p1);
-    if (m_point_set.find(p0) == m_point_set.end())
-        return LXe_FALSE;
-    if (m_point_set.find(p1) == m_point_set.end())
-        return LXe_FALSE;
-    return LXe_TRUE;
-}
-
-LxResult CToolOp::eltgrp_TestPoint(unsigned int index, LXtPointID point)
-{
-    if (m_point_set.find(point) != m_point_set.end())
-        return LXe_TRUE;
-    return LXe_FALSE;
 }
 
 /*
@@ -425,7 +482,6 @@ void initialize()
 
     srv = new CLxPolymorph<CToolOp>;
     srv->AddInterface(new CLxIfc_ToolOperation<CToolOp>);
-    srv->AddInterface(new CLxIfc_MeshElementGroup<CToolOp>);
     lx::AddSpawner(SRVNAME_TOOLOP, srv);
 
     CCommand::initialize();
