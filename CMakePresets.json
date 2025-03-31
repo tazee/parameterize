@@ -7,7 +7,7 @@
             "description": "コンパイラ C = /usr/bin/clang, CXX = /usr/bin/clang++ を使用しています",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/Parameterize",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ParameterizeKit",
                 "CMAKE_C_COMPILER": "/usr/bin/clang",
                 "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
                 "CMAKE_BUILD_TYPE": "Debug",
